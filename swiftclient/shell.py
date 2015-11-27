@@ -44,7 +44,7 @@ except ImportError:
 
 BASENAME = 'swift'
 commands = ('delete', 'download', 'list', 'post', 'stat', 'upload',
-            'capabilities', 'info', 'tempurl', 'auth')
+            'capabilities', 'info', 'tempurl', 'auth', 'disk_failure')
 
 
 def immediate_exit(signum, frame):
@@ -912,6 +912,37 @@ def st_upload(parser, args, output_manager):
                                 "Consider using the --segment-size option "
                                 "to chunk the object")
 
+        except SwiftError as e:
+            output_manager.error(e.value)
+
+st_disk_failure_options = '''[--device] '''
+
+st_disk_failure_help = ''' Uploads specified files and directories to the given container.
+
+Positional arguments:
+  <device>              Name of device in danger.
+'''.strip('\n')
+
+
+def st_disk_failure(parser, args, output_manager):
+    parser.add_option(
+        '-d', '--device', type=str,
+        help='The device in danger '
+        'the last upload.')
+    (options, args) = parse_args(parser, args)
+    args = args[1:]
+    if len(args) < 1:
+        output_manager.error(
+            'Usage: %s upload %s\n%s', BASENAME, st_upload_options,
+            st_upload_help)
+        return
+    else:
+        device = args[0]
+
+    _opts = vars(options)
+    with SwiftService(options=_opts) as swift:
+        try:
+            r = swift.disk_failure(device)
         except SwiftError as e:
             output_manager.error(e.value)
 

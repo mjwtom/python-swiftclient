@@ -1484,6 +1484,144 @@ class SwiftService(object):
 
             res = get_from_queue(rq)
 
+
+    # Disk Failure related methods
+    #
+    def disk_failure(self, device, options=None):
+        """
+        Upload a list of objects to a given container.
+
+        :param device: The device in danger.
+
+        :param options: A dictionary containing options to override the global
+                        options specified during the service object creation.
+                        These options are applied to all upload operations
+                        performed by this call, unless overridden on a per
+                        object basis. Possible options are given below::
+
+                            {
+                                'meta': [],
+                                'header': [],
+                                'segment_size': None,
+                                'use_slo': False,
+                                'segment_container': None,
+                                'leave_segments': False,
+                                'changed': None,
+                                'skip_identical': False,
+                                'fail_fast': False,
+                                'dir_marker': False  # Only for None sources
+                            }
+
+        :returns: True or False.
+
+        :raises: SwiftError
+        :raises: ClientException
+        """
+        if options is not None:
+            options = dict(self._options, **options)
+        else:
+            options = self._options
+
+        # Get the policy
+        policy_header = {}
+        _header = split_headers(options["header"])
+        if POLICY in _header:
+            policy_header[POLICY] = \
+                _header[POLICY]
+        # Send the in danger device information
+        details = {'action': 'disk_failure', 'device': device}
+        conn = get_conn(options)
+        headers = {'x-device-time': '%f' % round(time())}
+
+        for upload_object in upload_objects:
+            s = upload_object.source
+            o = upload_object.object_name
+            o_opts = upload_object.options
+            details = {'action': 'upload', 'container': container}
+            if o_opts is not None:
+                object_options = deepcopy(options)
+                object_options.update(o_opts)
+            else:
+                object_options = options
+            if hasattr(s, 'read'):
+                # We've got a file like object to upload to o
+                file_future = self.thread_manager.object_uu_pool.submit(
+                    self._upload_object_job, container, s, o, object_options
+                )
+                details['file'] = s
+                details['object'] = o
+                file_jobs[file_future] = details
+            elif s is not None:
+                # We've got a path to upload to o
+                details['path'] = s
+                details['object'] = o
+                if isdir(s):
+                    dir_future = self.thread_manager.object_uu_pool.submit(
+                        self._create_dir_marker_job, container, o,
+                        object_options, path=s
+                    )
+                    file_jobs[dir_future] = details
+                else:
+                    try:
+                        stat(s)
+                        file_future = \
+                            self.thread_manager.object_uu_pool.submit(
+                                self._upload_object_job, container, s, o,
+                                object_options, results_queue=rq
+                            )
+                        file_jobs[file_future] = details
+                    except OSError as err:
+                        # Avoid tying up threads with jobs that will fail
+                        traceback, err_time = report_traceback()
+                        logger.exception(err)
+                        res = {
+                            'action': 'upload_object',
+                            'container': container,
+                            'object': o,
+                            'success': False,
+                            'error': err,
+                            'traceback': traceback,
+                            'error_timestamp': err_time,
+                            'path': s
+                        }
+                        rq.put(res)
+            else:
+                # Create an empty object (as a dir marker if is_dir)
+                details['file'] = None
+                details['object'] = o
+                if object_options['dir_marker']:
+                    dir_future = self.thread_manager.object_uu_pool.submit(
+                        self._create_dir_marker_job, container, o,
+                        object_options
+                    )
+                    file_jobs[dir_future] = details
+                else:
+                    file_future = self.thread_manager.object_uu_pool.submit(
+                        self._upload_object_job, container, StringIO(),
+                        o, object_options
+                    )
+                    file_jobs[file_future] = details
+
+        # Start a thread to watch for upload results
+        Thread(
+            target=self._watch_futures, args=(file_jobs, rq)
+        ).start()
+
+        # yield results as they become available, including those from
+        # segment uploads.
+        res = get_from_queue(rq)
+        cancelled = False
+        while res is not None:
+            yield res
+
+            if not res['success']:
+                if not cancelled and options['fail_fast']:
+                    cancelled = True
+                    for f in file_jobs:
+                        f.cancel()
+
+            res = get_from_queue(rq)
+
     @staticmethod
     def _make_upload_objects(objects):
         upload_objects = []
