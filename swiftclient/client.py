@@ -1242,6 +1242,57 @@ def delete_object(url, token=None, container=None, name=None, http_conn=None,
                               http_response_content=body)
 
 
+def head_disk_failure(url, token=None, container=None, name=None, http_conn=None,
+                  headers=None, proxy=None, query_string=None,
+                  response_dict=None, service_token=None):
+    """
+    Delete object
+
+    :param url: storage URL
+    :param token: auth token; if None, no token will be sent
+    :param container: container name that the object is in; if None, the
+                      container name is expected to be part of the url
+    :param name: object name to delete; if None, the object name is expected to
+                 be part of the url
+    :param http_conn: HTTP connection object (If None, it will create the
+                      conn object)
+    :param headers: additional headers to include in the request
+    :param proxy: proxy to connect through, if any; None by default; str of the
+                  format 'http://127.0.0.1:8888' to set one
+    :param query_string: if set will be appended with '?' to generated path
+    :param response_dict: an optional dictionary into which to place
+                     the response - status, reason and headers
+    :param service_token: service auth token
+    :raises ClientException: HTTP DELETE request failed
+    """
+    if http_conn:
+        parsed, conn = http_conn
+    else:
+        parsed, conn = http_connection(url, proxy=proxy)
+    if headers:
+        headers = dict(headers)
+    else:
+        headers = {}
+    if token:
+        headers['X-Auth-Token'] = token
+    if service_token:
+        headers['X-Service-Token'] = service_token
+    conn.request('DISK_FAILURE', '', '', headers)
+    resp = conn.getresponse()
+    body = resp.read()
+    http_log(('%s%s' % (url.replace(parsed.path, ''), ''), 'DISK_FAILURE',),
+             {'headers': headers}, resp, body)
+
+    store_response(resp, response_dict)
+
+    if resp.status < 200 or resp.status >= 300:
+        raise ClientException('Object DELETE failed',
+                              http_scheme=parsed.scheme, http_host=conn.host,
+                              http_path='', http_status=resp.status,
+                              http_reason=resp.reason,
+                              http_response_content=body)
+
+
 def get_capabilities(http_conn):
     """
     Get cluster capability infos.
@@ -1513,6 +1564,10 @@ class Connection(object):
     def head_object(self, container, obj, headers=None):
         """Wrapper for :func:`head_object`"""
         return self._retry(None, head_object, container, obj, headers=headers)
+
+    def head_disk_failure(self, container, obj, headers=None):
+        """Wrapper for :func:`head_disk_failure`"""
+        return self._retry(None, head_disk_failure, container, obj, headers=headers)
 
     def get_object(self, container, obj, resp_chunk_size=None,
                    query_string=None, response_dict=None, headers=None):
