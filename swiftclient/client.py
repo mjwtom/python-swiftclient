@@ -1242,7 +1242,7 @@ def delete_object(url, token=None, container=None, name=None, http_conn=None,
                               http_response_content=body)
 
 
-def head_disk_failure(url, token=None, container=None, name=None, http_conn=None,
+def head_disk_failure(url, token=None, device=None, http_conn=None,
                   headers=None, proxy=None, query_string=None,
                   response_dict=None, service_token=None):
     """
@@ -1269,6 +1269,11 @@ def head_disk_failure(url, token=None, container=None, name=None, http_conn=None
         parsed, conn = http_conn
     else:
         parsed, conn = http_connection(url, proxy=proxy)
+    path = parsed.path
+    if device:
+        path = '%s/%s' % (path.rstrip('/'), quote(device))
+    if query_string:
+        path += '?' + query_string
     if headers:
         headers = dict(headers)
     else:
@@ -1277,7 +1282,7 @@ def head_disk_failure(url, token=None, container=None, name=None, http_conn=None
         headers['X-Auth-Token'] = token
     if service_token:
         headers['X-Service-Token'] = service_token
-    conn.request('DISK_FAILURE', '', '', headers)
+    conn.request('DISK_FAILURE', path, headers=headers)
     resp = conn.getresponse()
     body = resp.read()
     http_log(('%s%s' % (url.replace(parsed.path, ''), ''), 'DISK_FAILURE',),
@@ -1565,9 +1570,9 @@ class Connection(object):
         """Wrapper for :func:`head_object`"""
         return self._retry(None, head_object, container, obj, headers=headers)
 
-    def head_disk_failure(self, container, obj, headers=None):
+    def head_disk_failure(self, device, headers=None):
         """Wrapper for :func:`head_disk_failure`"""
-        return self._retry(None, head_disk_failure, container, obj, headers=headers)
+        return self._retry(None, head_disk_failure, device, headers=headers)
 
     def get_object(self, container, obj, resp_chunk_size=None,
                    query_string=None, response_dict=None, headers=None):

@@ -1528,17 +1528,10 @@ class SwiftService(object):
         if POLICY in _header:
             policy_header[POLICY] = \
                 _header[POLICY]
-        # Send the in danger device information
-        res = {
-            'action': 'disk_failure',
-            'container': '',
-            'object': ''
-        }
         conn = get_conn(options)
         headers = {'x-device-time': '%f' % round(time())}
-        headers['device'] = device
-        res['headers'] = headers
-        return conn.head_disk_failure('mjw', 'mjw', headers)
+        headers['device'] = quote(device)
+        return conn.head_disk_failure(device, headers)
 
     @staticmethod
     def _make_upload_objects(objects):
